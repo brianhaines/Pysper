@@ -1,0 +1,3 @@
+
+Basic API URL for Prosper
+https://api.prosper.com/api/Listings/?$top=10&$filter=BorrowerAPR gt 0.15922m
