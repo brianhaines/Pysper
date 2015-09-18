@@ -47,7 +47,7 @@ def main():
 	#Define the timezone
 	eastern = pytz.timezone('US/Eastern')
 
-
+	# Long running loop
 	while True:
 		#Current Time
 		start_time = time()
@@ -80,9 +80,8 @@ def main():
 			
 			db.commit()
 			i += 1
-
 		
-		q_elapsed = round(time() - start_time,4)
+		q_elapsed = round(time() - start_time,2)
 
 		# Put query record into the queryTracer table
 		cursor.execute('''INSERT INTO queryTracker(queryDate, queryTime, listingCount, qElapsed) VALUES(?,?,?,?)''',
@@ -96,7 +95,6 @@ def main():
 
 		# Wait for N seconds between queries
 		sleep(30)
-
 
 	cursor.close()
 	db.close()
