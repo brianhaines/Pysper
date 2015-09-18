@@ -3,6 +3,8 @@ import requests
 import sqlite3
 from datetime import datetime
 import pytz
+from time import sleep
+from time import time
 
 
 def getUSRPW(pwPath):
@@ -21,11 +23,7 @@ def main():
 	urlString = ("https://", usrName, ":",PW, "@", "api.prosper.com/api/Listings/") #?$top=20")
 	urlString = ''.join(urlString)
 
-	# Send request for JSON listing to Prosper
-	headers = {'Content-Type': 'application/json'}
-	r = requests.get(urlString, headers=headers)
-	j = r.json()
-
+	
 	#create or open existing db
 	db = sqlite3.connect('Listings.db')
 
@@ -39,48 +37,70 @@ def main():
 
 	#Create the table for tracking each time we query the listings
 	cursor.execute('''CREATE TABLE IF NOT EXISTS queryTracker(qNum INTEGER PRIMARY KEY ASC, 
-			queryDate TEXT, queryTime TEXT, listingCount INTEGER)''')
+			queryDate TEXT, queryTime TEXT, listingCount INTEGER,qElapsed REAL)''')
 
 	db.commit()
 
-
-	#Current Time
+	# Format response as JSON
+	headers = {'Content-Type': 'application/json'}
+	
+	#Define the timezone
 	eastern = pytz.timezone('US/Eastern')
-	t = datetime.now(eastern)
-	queryDateTime = [t.date().isoformat(),t.time().isoformat()]
 
 
-	i=1
-	for listing in j:
+	while True:
+		#Current Time
+		start_time = time()
+		t = datetime.now(eastern)
+		queryDateTime = [t.date().isoformat(),t.time().isoformat()]
 
-		#'OR IGNORE' allows the INSERT command to ignore any rows where the 'unique' constraint is violated.
-		cursor.execute('''INSERT OR IGNORE INTO currentListings(listingNumber, VerificationStage, ListingStatus, MemberKey, ListingStartDate) VALUES(?,?,?,?,?)''',
-		 (listing['ListingNumber'],
-		 	listing['VerificationStage'],
-		 	listing['ListingStatus'],
-		 	listing['MemberKey'],
-		 	listing['ListingStartDate']))
+		# Send request listing to Prosper
 		
-		db.commit()
+		try:
+			r = requests.get(urlString, headers=headers)
+		except requests.exceptions.RequestException as e:
+			print('Request Error: ', e)
+			sleep(2)
+			r = requests.get(urlString, headers=headers)
+
+		# Convert JSON response to a python dict
+		listings = r.json()
+
+		# Loop over results
+		i=1
+		for listing in listings:
+
+			#'OR IGNORE' allows the INSERT command to ignore any rows where the 'unique' constraint is violated.
+			cursor.execute('''INSERT OR IGNORE INTO currentListings(listingNumber, VerificationStage, ListingStatus, MemberKey, ListingStartDate) VALUES(?,?,?,?,?)''',
+			 (listing['ListingNumber'],
+			 	listing['VerificationStage'],
+			 	listing['ListingStatus'],
+			 	listing['MemberKey'],
+			 	listing['ListingStartDate']))
 			
+			db.commit()
+			i += 1
 
-		print('____________________')
-		print('Listing: ', i)
-		print('ListingNumber: ', listing['ListingNumber'])
-		print('VerificationStage: ', listing['VerificationStage'])
-		print('ListingStatus: ', listing['ListingStatus'])
-		print('MemberKey: ', listing['MemberKey'])
-		print('ListingStartDate:', listing['ListingStartDate'])
-		print('____________________')
-		i+=1
+		
+		q_elapsed = round(time() - start_time,4)
 
-	# Put query record into the queryTracer table
-	cursor.execute('''INSERT INTO queryTracker(queryDate, queryTime, listingCount) VALUES(?,?,?)''',(queryDateTime[0],queryDateTime[1],(i-1)))
+		# Put query record into the queryTracer table
+		cursor.execute('''INSERT INTO queryTracker(queryDate, queryTime, listingCount, qElapsed) VALUES(?,?,?,?)''',
+			(queryDateTime[0],queryDateTime[1],(i-1),q_elapsed))
 
-	db.commit()
+		db.commit()
 
-	# When done looping over JSON listings, close the DB connection
-	db.close
+		print('Query Time: ', queryDateTime[1])
+		print('Listings: ', i-1)
+		print('Total Time: ',q_elapsed)
+
+		# Wait for N seconds between queries
+		sleep(30)
+
+
+	cursor.close()
+	db.close()
+		
 
 if __name__ == '__main__':
 	main()
