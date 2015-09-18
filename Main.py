@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import requests
 import sqlite3
+from datetime import datetime
+import pytz
 
 
 def getUSRPW(pwPath):
@@ -33,6 +35,20 @@ def main():
 	cursor.execute('''CREATE TABLE IF NOT EXISTS currentListings(listingNumber INTEGER unique PRIMARY KEY, 
 				VerificationStage INTEGER, ListingStatus INTEGER, MemberKey TEXT, ListingStartDate TEXT)''')
 
+	db.commit()
+
+	#Create the table for tracking each time we query the listings
+	cursor.execute('''CREATE TABLE IF NOT EXISTS queryTracker(qNum INTEGER PRIMARY KEY ASC, 
+			queryDate TEXT, queryTime TEXT, listingCount INTEGER)''')
+
+	db.commit()
+
+
+	#Current Time
+	eastern = pytz.timezone('US/Eastern')
+	t = datetime.now(eastern)
+	queryDateTime = [t.date().isoformat(),t.time().isoformat()]
+
 
 	i=1
 	for listing in j:
@@ -57,6 +73,11 @@ def main():
 		print('ListingStartDate:', listing['ListingStartDate'])
 		print('____________________')
 		i+=1
+
+	# Put query record into the queryTracer table
+	cursor.execute('''INSERT INTO queryTracker(queryDate, queryTime, listingCount) VALUES(?,?,?)''',(queryDateTime[0],queryDateTime[1],(i-1)))
+
+	db.commit()
 
 	# When done looping over JSON listings, close the DB connection
 	db.close
