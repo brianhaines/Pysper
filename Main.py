@@ -25,7 +25,7 @@ def main():
 
 	
 	#create or open existing db
-	db = sqlite3.connect('Listings2.db')
+	db = sqlite3.connect('Listings_v2.db')
 
 	# Get a cursor object
 	cursor = db.cursor()
@@ -35,7 +35,7 @@ def main():
 
 	#This is an SQL string to create a table in the database.
 	cursor.execute('''CREATE TABLE IF NOT EXISTS historicalListings(listingNumber INTEGER unique PRIMARY KEY, 
-				VerificationStage INTEGER, ListingStatus INTEGER, MemberKey TEXT, ListingStartDate TEXT)''')
+				VerificationStage INTEGER, ListingStatus INTEGER, MemberKey TEXT, ListingStartDate TEXT, lastSeen TEXT)''')
 
 	#Create the table for tracking each time we query the listings
 	cursor.execute('''CREATE TABLE IF NOT EXISTS queryTracker(qNum INTEGER PRIMARY KEY ASC, 
@@ -47,13 +47,13 @@ def main():
 	headers = {'Content-Type': 'application/json'}
 	
 	#Define the timezone
-	eastern = pytz.timezone('US/Eastern')
+	pacific = pytz.timezone('US/Pacific')
 
 	# Long running loop
 	while True:
 		#Current Time
 		start_time = time()
-		t = datetime.now(eastern)
+		t = datetime.now(pacific)
 		queryDateTime = [t.date().isoformat(),t.time().isoformat()]
 
 		# Send request listing to Prosper
@@ -64,6 +64,9 @@ def main():
 		except requests.exceptions.RequestException as e:
 			print('Request Error: ', e)
 			sleep(2)
+			r = requests.get(urlString, headers=headers)
+			# Convert JSON response to a python dict
+			listings = r.json()
 
 
 		# Create temporary table for listings just returned
@@ -84,53 +87,58 @@ def main():
 				 	listing['ListingStartDate']))
 				
 			except Exception as e:
-				print("Error: ", listing['ListingNumber'], e)
+				print("Intsert Temp Error: ", e)
 
 			i += 1
 		
 		db.commit()
 
 		# The temp Listing table is now populated. Perform a join on temp and current to get
-		# those listing that are no longer on the API. Insert them to the historical table.
-
-		
+		# those listing that are no longer on the API. Move them to the historical table.
 		hist=[]
-
 		for row in cursor.execute('''SELECT * FROM currentListings LEFT OUTER JOIN tempListings 
 				ON currentListings.listingNumber = tempListings.listingNumber 
 				WHERE tempListings.ListingNumber IS NULL'''):
-			h = row[:5]
-			h = h + (t.isoformat(),)
-			hist.append(h[:6]) # Why does join give me 10 clumns		
+			h = row[:5] + (t.isoformat(),)
+			#h = h + (t.isoformat(),)
+			hist.append(h[:6]) # Why does join give me 10 clumns?
 
 		# Put the listings no longer in current into historical
-		cursor.executemany('INSERT OR IGNORE INTO historicalListings VALUES (?,?,?,?,?,?)', hist)
+		try:
+			cursor.executemany('INSERT OR IGNORE INTO historicalListings VALUES (?,?,?,?,?,?)', hist)
+			# Replace Current with Temp
+			cursor.execute('DROP TABLE currentListings')
+			cursor.execute('ALTER TABLE tempListings RENAME TO currentListings')
 
-		# Replace Current with Temp
-		cursor.execute('DROP TABLE currentListings')
-		cursor.execute('ALTER TABLE tempListings RENAME TO currentListings')
+			# Delete the temporary table
+			cursor.execute('DROP TABLE IF EXISTS tempListings')
+			db.commit()
+		except Exception as e:
+			print("Intsert Many Error: ", e)		
 
-
-		# Delete the temporary table
-		cursor.execute('DROP TABLE IF EXISTS tempListings')
-
-		# Put query record into the queryTracer table
-		q_elapsed = round(time() - start_time,2)
-		cursor.execute('''INSERT INTO queryTracker(queryDate, queryTime, listingCount, qElapsed) VALUES(?,?,?,?)''',
-			(queryDateTime[0],queryDateTime[1],(i-1),q_elapsed))
-
-		db.commit()
+		# Put the tracking record 
+		try:
+			# Put query record into the queryTracker table
+			q_elapsed = round(time() - start_time,2)
+			cursor.execute('''INSERT INTO queryTracker(queryDate, queryTime, listingCount, qElapsed) VALUES(?,?,?,?)''',
+				(queryDateTime[0],queryDateTime[1],(i-1),q_elapsed))
+			db.commit()
+		except Exception as e:
+			print("Intsert Tracker Error: ", e)		
+		
 
 		print('Query Time: ', queryDateTime[1])
 		print('Listings: ', i-1)
 		print('Elapsed Time: ',q_elapsed)
 
 		# Wait for N seconds between queries
-		sleep(30)
+		sleep(.1)
 
+	# Tidy up the database
 	cursor.close()
 	db.close()
 		
 
+		
 if __name__ == '__main__':
 	main()
