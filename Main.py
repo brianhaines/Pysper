@@ -20,7 +20,8 @@ def main():
 	PW = pw[1]
 
 	#Build the API url using username and PW
-	urlString = ("https://", usrName, ":",PW, "@", "api.prosper.com/api/Listings/") #?$top=75")
+	#urlString = ("https://", usrName, ":",PW, "@", "api.prosper.com/api/Listings/") #?$top=75")
+	urlString = ("https://", usrName, ":",PW, "@", "api.prosper.com/api/Listings/?$top=90")
 	urlString = ''.join(urlString)
 
 	
@@ -29,18 +30,19 @@ def main():
 
 	# Get a cursor object
 	cursor = db.cursor()
+
 	#This is an SQL string to create a table in the database.
 	cursor.execute('''CREATE TABLE IF NOT EXISTS currentListings(listingNumber INTEGER unique PRIMARY KEY, 
 				MemberKey TEXT, ListingCreationDate TEXT, ListingStartDate TEXT, ListingRequestAmount REAL,
 				ListingAmountFunded REAL, AmountRemaining REAL, PercentFunded REAL, listingElapsedSeconds REAL,
-				ListingStatus INTEGER, ListingStatusDescription TEXT
+				ListingStatus INTEGER, ListingStatusDescription TEXT, elapsedFunding TEXT
 				)''')
 
 	#This is an SQL string to create a table in the database.
 	cursor.execute('''CREATE TABLE IF NOT EXISTS historicalListings(listingNumber INTEGER unique PRIMARY KEY, 
 				MemberKey TEXT, ListingCreationDate TEXT, ListingStartDate TEXT, ListingRequestAmount REAL,
 				ListingAmountFunded REAL, AmountRemaining REAL, PercentFunded REAL, listingElapsedSeconds REAL,
-				ListingStatus INTEGER, ListingStatusDescription TEXT, lastSeen TEXT
+				ListingStatus INTEGER, ListingStatusDescription TEXT, elapsedFunding TEXT, lastSeen TEXT
 				)''')
 
 	#Create the table for tracking each time we query the listings
@@ -76,8 +78,9 @@ def main():
 		cursor.execute('''CREATE TABLE IF NOT EXISTS tempListings(listingNumber INTEGER unique PRIMARY KEY, 
 				MemberKey TEXT, ListingCreationDate TEXT, ListingStartDate TEXT, ListingRequestAmount REAL,
 				ListingAmountFunded REAL, AmountRemaining REAL, PercentFunded REAL, listingElapsedSeconds REAL,
-				ListingStatus INTEGER, ListingStatusDescription TEXT
+				ListingStatus INTEGER, ListingStatusDescription TEXT, elapsedFunding TEXT, lastSeen TEXT
 				)''')
+
 		# Loop over results
 		i=1
 		for listing in listings:
@@ -85,15 +88,19 @@ def main():
 			#'OR IGNORE' allows the INSERT command to ignore any rows where the 'unique' constraint is violated.
 			
 			# Calc the listing elapsed time.
-			t2 = listing['ListingStartDate']
-			t2 = datetime.strptime(t2, "%Y-%m-%dT%H:%M:%S.%f")
+			#t2 = listing['ListingStartDate']
+			t2 = datetime.strptime(listing['ListingStartDate'], "%Y-%m-%dT%H:%M:%S.%f")
 			t2 = t2.replace(tzinfo = pacific)
-			list_elapse = t2 - t
+			list_elapse = t - t2
+
+			# Make elapsed funding tuple
+			elFund = (round(list_elapse.total_seconds(),2), listing['PercentFunded'])
+			elFund = str(elFund)
 
 			try:
 				cursor.execute('''INSERT INTO tempListings(listingNumber, MemberKey, ListingCreationDate, ListingStartDate, 
 					ListingRequestAmount, ListingAmountFunded, AmountRemaining, PercentFunded, listingElapsedSeconds, 
-					ListingStatus, ListingStatusDescription) VALUES(?,?,?,?,?,?,?,?,?,?,?)''',
+					ListingStatus, ListingStatusDescription,elapsedFunding) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
 				 (listing['ListingNumber'],
 					listing['MemberKey'],
 					listing['ListingCreationDate'],
@@ -105,7 +112,8 @@ def main():
 					round(list_elapse.total_seconds(),2),
 					#listing['AmountRemaining'],
 					listing['ListingStatus'],
-					listing['ListingStatusDescription']))
+					listing['ListingStatusDescription'],
+					elFund))
 				
 			except Exception as e:
 				print("Intsert Temp Error: ", e)
@@ -120,22 +128,36 @@ def main():
 		for row in cursor.execute('''SELECT * FROM currentListings LEFT OUTER JOIN tempListings 
 				ON currentListings.listingNumber = tempListings.listingNumber 
 				WHERE tempListings.ListingNumber IS NULL'''):
-			h = row[:11] + (t.isoformat(),)
-			
-			hist.append(h[:12]) # Why does join give me N * 2 columns?
+
+			h = row[:12] + (t.isoformat(),)
+
+			hist.append(h[:13]) # Why does join give me N * 2 columns?
 
 		# Put the listings no longer in current into historical
 		try:
-			cursor.executemany('INSERT OR IGNORE INTO historicalListings VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', hist)
+			cursor.executemany('INSERT OR IGNORE INTO historicalListings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', hist)
 			# Replace Current with Temp
 			cursor.execute('DROP TABLE currentListings')
 			cursor.execute('ALTER TABLE tempListings RENAME TO currentListings')
 
 			# Delete the temporary table
 			cursor.execute('DROP TABLE IF EXISTS tempListings')
+
 			db.commit()
 		except Exception as e:
 			print("Intsert Many Error: ", e)		
+
+
+	# Select the listingElapsedSeconds field from temporary
+		#for each_hist in hist:
+		#	list_num = (each_hist[0],)
+		#	cursor.execute('''SELECT currentListings.listingElapsedSeconds 
+		##		WHERE currentListings.ListingNumber = ?''', list_num)
+		#	list_elaps = cursor.fetchone()
+		
+			# 
+		
+
 
 		# Put the query stats into the Query Tracker
 		try:
@@ -153,7 +175,7 @@ def main():
 		print('Elapsed Time: ',q_elapsed)
 
 		# Wait for N seconds between queries
-		sleep(2)
+		sleep(30)
 
 	# Tidy up the database
 	cursor.close()
