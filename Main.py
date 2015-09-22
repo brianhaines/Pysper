@@ -25,17 +25,23 @@ def main():
 
 	
 	#create or open existing db
-	db = sqlite3.connect('Listings_v2.db')
+	db = sqlite3.connect('Listings_elpsedTracker.db')
 
 	# Get a cursor object
 	cursor = db.cursor()
 	#This is an SQL string to create a table in the database.
 	cursor.execute('''CREATE TABLE IF NOT EXISTS currentListings(listingNumber INTEGER unique PRIMARY KEY, 
-				VerificationStage INTEGER, ListingStatus INTEGER, MemberKey TEXT, ListingStartDate TEXT)''')
+				MemberKey TEXT, ListingCreationDate TEXT, ListingStartDate TEXT, ListingRequestAmount REAL,
+				ListingAmountFunded REAL, AmountRemaining REAL, PercentFunded REAL, listingElapsedSeconds REAL,
+				ListingStatus INTEGER, ListingStatusDescription TEXT
+				)''')
 
 	#This is an SQL string to create a table in the database.
 	cursor.execute('''CREATE TABLE IF NOT EXISTS historicalListings(listingNumber INTEGER unique PRIMARY KEY, 
-				VerificationStage INTEGER, ListingStatus INTEGER, MemberKey TEXT, ListingStartDate TEXT, lastSeen TEXT)''')
+				MemberKey TEXT, ListingCreationDate TEXT, ListingStartDate TEXT, ListingRequestAmount REAL,
+				ListingAmountFunded REAL, AmountRemaining REAL, PercentFunded REAL, listingElapsedSeconds REAL,
+				ListingStatus INTEGER, ListingStatusDescription TEXT, lastSeen TEXT
+				)''')
 
 	#Create the table for tracking each time we query the listings
 	cursor.execute('''CREATE TABLE IF NOT EXISTS queryTracker(qNum INTEGER PRIMARY KEY ASC, 
@@ -64,27 +70,42 @@ def main():
 		except requests.exceptions.RequestException as e:
 			print('Request Error: ', e)
 			sleep(2)
-			r = requests.get(urlString, headers=headers)
-			# Convert JSON response to a python dict
-			listings = r.json()
-
+			
 
 		# Create temporary table for listings just returned
 		cursor.execute('''CREATE TABLE IF NOT EXISTS tempListings(listingNumber INTEGER unique PRIMARY KEY, 
-				VerificationStage INTEGER, ListingStatus INTEGER, MemberKey TEXT, ListingStartDate TEXT)''')
+				MemberKey TEXT, ListingCreationDate TEXT, ListingStartDate TEXT, ListingRequestAmount REAL,
+				ListingAmountFunded REAL, AmountRemaining REAL, PercentFunded REAL, listingElapsedSeconds REAL,
+				ListingStatus INTEGER, ListingStatusDescription TEXT
+				)''')
 		# Loop over results
 		i=1
 		for listing in listings:
 			#Make a dict to hold these changes
 			#'OR IGNORE' allows the INSERT command to ignore any rows where the 'unique' constraint is violated.
 			
+			# Calc the listing elapsed time.
+			t2 = listing['ListingStartDate']
+			t2 = datetime.strptime(t2, "%Y-%m-%dT%H:%M:%S.%f")
+			t2 = t2.replace(tzinfo = pacific)
+			list_elapse = t2 - t
+
 			try:
-				cursor.execute('''INSERT INTO tempListings(listingNumber, VerificationStage, ListingStatus, MemberKey, ListingStartDate) VALUES(?,?,?,?,?)''',
+				cursor.execute('''INSERT INTO tempListings(listingNumber, MemberKey, ListingCreationDate, ListingStartDate, 
+					ListingRequestAmount, ListingAmountFunded, AmountRemaining, PercentFunded, listingElapsedSeconds, 
+					ListingStatus, ListingStatusDescription) VALUES(?,?,?,?,?,?,?,?,?,?,?)''',
 				 (listing['ListingNumber'],
-				 	listing['VerificationStage'],
-				 	listing['ListingStatus'],
-				 	listing['MemberKey'],
-				 	listing['ListingStartDate']))
+					listing['MemberKey'],
+					listing['ListingCreationDate'],
+					listing['ListingStartDate'],
+					listing['ListingRequestAmount'],
+					listing['ListingAmountFunded'],
+					listing['AmountRemaining'],
+					listing['PercentFunded'],
+					round(list_elapse.total_seconds(),2),
+					#listing['AmountRemaining'],
+					listing['ListingStatus'],
+					listing['ListingStatusDescription']))
 				
 			except Exception as e:
 				print("Intsert Temp Error: ", e)
@@ -99,13 +120,13 @@ def main():
 		for row in cursor.execute('''SELECT * FROM currentListings LEFT OUTER JOIN tempListings 
 				ON currentListings.listingNumber = tempListings.listingNumber 
 				WHERE tempListings.ListingNumber IS NULL'''):
-			h = row[:5] + (t.isoformat(),)
-			#h = h + (t.isoformat(),)
-			hist.append(h[:6]) # Why does join give me 10 clumns?
+			h = row[:11] + (t.isoformat(),)
+			
+			hist.append(h[:12]) # Why does join give me N * 2 columns?
 
 		# Put the listings no longer in current into historical
 		try:
-			cursor.executemany('INSERT OR IGNORE INTO historicalListings VALUES (?,?,?,?,?,?)', hist)
+			cursor.executemany('INSERT OR IGNORE INTO historicalListings VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', hist)
 			# Replace Current with Temp
 			cursor.execute('DROP TABLE currentListings')
 			cursor.execute('ALTER TABLE tempListings RENAME TO currentListings')
@@ -116,7 +137,7 @@ def main():
 		except Exception as e:
 			print("Intsert Many Error: ", e)		
 
-		# Put the tracking record 
+		# Put the query stats into the Query Tracker
 		try:
 			# Put query record into the queryTracker table
 			q_elapsed = round(time() - start_time,2)
@@ -132,7 +153,7 @@ def main():
 		print('Elapsed Time: ',q_elapsed)
 
 		# Wait for N seconds between queries
-		sleep(.1)
+		sleep(2)
 
 	# Tidy up the database
 	cursor.close()
