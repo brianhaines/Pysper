@@ -20,8 +20,8 @@ def main():
 	PW = pw[1]
 
 	#Build the API url using username and PW
-	#urlString = ("https://", usrName, ":",PW, "@", "api.prosper.com/api/Listings/") #?$top=75")
-	urlString = ("https://", usrName, ":",PW, "@", "api.prosper.com/api/Listings/?$top=90")
+	urlString = ("https://", usrName, ":",PW, "@", "api.prosper.com/api/Listings/") #?$top=75")
+	#urlString = ("https://", usrName, ":",PW, "@", "api.prosper.com/api/Listings/?$top=169")
 	urlString = ''.join(urlString)
 
 	
@@ -54,15 +54,16 @@ def main():
 	# Format response as JSON
 	headers = {'Content-Type': 'application/json'}
 	
-	#Define the timezone
-	pacific = pytz.timezone('US/Pacific')
+	#Define the timezone America/Los_Angeles  US/Pacific
+	pacific = pytz.timezone('America/Los_Angeles')
 
 	# Long running loop
 	while True:
 		#Current Time
 		start_time = time()
-		t = datetime.now(pacific)
+		t = datetime.now(pacific).replace(microsecond=0)
 		queryDateTime = [t.date().isoformat(),t.time().isoformat()]
+		t_sec = int(t.strftime("%s"))
 
 		# Send request listing to Prosper
 		try:
@@ -89,12 +90,24 @@ def main():
 			
 			# Calc the listing elapsed time.
 			#t2 = listing['ListingStartDate']
-			t2 = datetime.strptime(listing['ListingStartDate'], "%Y-%m-%dT%H:%M:%S.%f")
+			l_year = listing['ListingStartDate'][:4]
+			l_month = listing['ListingStartDate'][5:7]
+			l_day = listing['ListingStartDate'][8:10]
+			l_hour = listing['ListingStartDate'][11:13]
+			l_minute = listing['ListingStartDate'][14:16]
+			l_second = listing['ListingStartDate'][17:19]
+
+
+			t2 = datetime(int(l_year),int(l_month),int(l_day),int(l_hour),int(l_minute),int(l_second))
+			#t2 = datetime.strptime(listing['ListingStartDate'], "%Y-%m-%dT%H:%M:%S.%f")
+			t2_sec = int(t2.strftime("%s"))
 			t2 = t2.replace(tzinfo = pacific)
 			list_elapse = t - t2
+			list_elapse_sec = t_sec - t2_sec
 
 			# Make elapsed funding tuple
-			elFund = (round(list_elapse.total_seconds(),2), listing['PercentFunded'])
+			#elFund = (round(list_elapse.total_seconds(),2), listing['PercentFunded'])
+			elFund = [(list_elapse_sec, listing['PercentFunded'])]
 			elFund = str(elFund)
 
 			try:
@@ -109,7 +122,8 @@ def main():
 					listing['ListingAmountFunded'],
 					listing['AmountRemaining'],
 					listing['PercentFunded'],
-					round(list_elapse.total_seconds(),2),
+					list_elapse_sec,
+					#round(list_elapse.total_seconds(),2),
 					#listing['AmountRemaining'],
 					listing['ListingStatus'],
 					listing['ListingStatusDescription'],
@@ -175,7 +189,7 @@ def main():
 		print('Elapsed Time: ',q_elapsed)
 
 		# Wait for N seconds between queries
-		sleep(30)
+		sleep(.1)
 
 	# Tidy up the database
 	cursor.close()
