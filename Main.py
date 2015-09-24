@@ -5,6 +5,7 @@ from datetime import datetime
 import pytz
 from time import sleep
 from time import time
+from ast import literal_eval
 
 
 def getUSRPW(pwPath):
@@ -84,10 +85,8 @@ def main():
 
 		# Loop over results
 		i=1
+		elapse_dict = {}
 		for listing in listings:
-			#Make a dict to hold these changes
-			#'OR IGNORE' allows the INSERT command to ignore any rows where the 'unique' constraint is violated.
-			
 			# Calc the listing elapsed time.
 			#t2 = listing['ListingStartDate']
 			l_year = listing['ListingStartDate'][:4]
@@ -109,6 +108,7 @@ def main():
 			#elFund = (round(list_elapse.total_seconds(),2), listing['PercentFunded'])
 			elFund = [(list_elapse_sec, listing['PercentFunded'])]
 			elFund = str(elFund)
+			elapse_dict[listing['ListingNumber']] = elFund
 
 			try:
 				cursor.execute('''INSERT INTO tempListings(listingNumber, MemberKey, ListingCreationDate, ListingStartDate, 
@@ -134,6 +134,7 @@ def main():
 
 			i += 1
 		
+		# First commit after creating tempListings table
 		db.commit()
 
 		# The temp Listing table is now populated. Perform a join on temp and current to get
@@ -150,17 +151,37 @@ def main():
 		# Put the listings no longer in current into historical
 		try:
 			cursor.executemany('INSERT OR IGNORE INTO historicalListings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', hist)
-			# Replace Current with Temp
-			cursor.execute('DROP TABLE currentListings')
-			cursor.execute('ALTER TABLE tempListings RENAME TO currentListings')
-
-			# Delete the temporary table
-			cursor.execute('DROP TABLE IF EXISTS tempListings')
-
+			
 			db.commit()
 		except Exception as e:
 			print("Intsert Many Error: ", e)		
 
+		# Loop over the current listings and pull out the elapsedFunding values
+		
+		for curListing in cursor.execute('''SELECT cl.listingNumber, cl.elapsedFunding FROM currentListings cl'''):
+			#elapse_dict[curListing[0]] = curListing[1].append(elapse_dict[curListing[0]])
+			try:
+				el_cur_list = literal_eval(curListing[1]) # Gives us a list
+				tmp_cur_list = literal_eval(elapse_dict[curListing[0]])
+				combined_list = el_cur_list + tmp_cur_list
+				elapse_dict[curListing[0]]=str(combined_list)
+			except Exception as e:
+				#when the key is missting, skip it
+				print("Elapsed Key missing: ", e)
+			
+
+		# For each key in elapse_dict, update that tempListing field
+		for key, value in elapse_dict.items():
+			cursor.execute('''UPDATE tempListings SET elapsedFunding = ? WHERE ListingNumber = ?''', (value, key))
+
+		# Replace Current with Temp
+		cursor.execute('DROP TABLE currentListings')
+		cursor.execute('ALTER TABLE tempListings RENAME TO currentListings')
+
+		# Delete the temporary table
+		cursor.execute('DROP TABLE IF EXISTS tempListings')
+
+		db.commit()
 
 	# Select the listingElapsedSeconds field from temporary
 		#for each_hist in hist:
