@@ -168,11 +168,13 @@ def main():
 			except Exception as e:
 				#when the key is missting, skip it
 				print("Elapsed Key missing: ", e)
-			
 
 		# For each key in elapse_dict, update that tempListing field
 		for key, value in elapse_dict.items():
-			cursor.execute('''UPDATE tempListings SET elapsedFunding = ? WHERE ListingNumber = ?''', (value, key))
+			try:
+				cursor.execute('''UPDATE tempListings SET elapsedFunding = ? WHERE ListingNumber = ?''', (value, key))
+			except Exception as e:
+				print("Update Elapsed Funding Fail")
 
 		# Replace Current with Temp
 		cursor.execute('DROP TABLE currentListings')
@@ -181,17 +183,7 @@ def main():
 		# Delete the temporary table
 		cursor.execute('DROP TABLE IF EXISTS tempListings')
 
-		db.commit()
-
-	# Select the listingElapsedSeconds field from temporary
-		#for each_hist in hist:
-		#	list_num = (each_hist[0],)
-		#	cursor.execute('''SELECT currentListings.listingElapsedSeconds 
-		##		WHERE currentListings.ListingNumber = ?''', list_num)
-		#	list_elaps = cursor.fetchone()
-		
-			# 
-		
+		db.commit()		
 
 
 		# Put the query stats into the Query Tracker
