@@ -32,9 +32,11 @@ def pingAPI(url_str, headers):
 		return listings
 	except requests.exceptions.RequestException as e:
 		print('Request Error: ', e)
-		sleep(2)
+		sleep(1)
+		return
 	except Exception as e:
 		print('Reques Error: ', e)
+		return
 
 def ListingStartDate(lst_strt):
 	l_year = lst_strt[:4]
@@ -73,31 +75,14 @@ def defineTables(dtbs,crsr):
 				ListingAmountFunded REAL, AmountRemaining REAL, PercentFunded REAL, listingElapsedSeconds REAL,
 				ListingStatus INTEGER, ListingStatusDescription TEXT, percent_1_minute REAL, percent_2_minute REAL,
 				percent_3_minute REAL, percent_5_minute REAL, percent_10_minute REAL, percent_15_minute REAL,
-				percent_30_minute REAL, percent_60_minute REAL
+				percent_30_minute REAL, percent_60_minute REAL, lastSeen TEXT
 				)''')
 
 
-	#This is an SQL string to create a table in the database.
-	crsr.execute('''CREATE TABLE IF NOT EXISTS currentListings(listingNumber INTEGER unique PRIMARY KEY, 
-				MemberKey TEXT, ListingCreationDate TEXT, ListingStartDate TEXT, ListingRequestAmount REAL,
-				ListingAmountFunded REAL, AmountRemaining REAL, PercentFunded REAL, listingElapsedSeconds REAL,
-				ListingStatus INTEGER, ListingStatusDescription TEXT, percent_1_minute REAL, percent_2_minute REAL,
-				percent_3_minute REAL, percent_5_minute REAL, percent_10_minute REAL, percent_15_minute REAL,
-				percent_30_minute REAL, percent_60_minute REAL
-				)''')
-
-	#This is an SQL string to create a table in the database.
-	crsr.execute('''CREATE TABLE IF NOT EXISTS historicalListings(listingNumber INTEGER unique PRIMARY KEY, 
-				MemberKey TEXT, ListingCreationDate TEXT, ListingStartDate TEXT, ListingRequestAmount REAL,
-				ListingAmountFunded REAL, AmountRemaining REAL, PercentFunded REAL, listingElapsedSeconds REAL,
-				ListingStatus INTEGER, ListingStatusDescription TEXT, percent_1_minute REAL, percent_2_minute REAL,
-				percent_3_minute REAL, percent_5_minute REAL, percent_10_minute REAL, percent_15_minute REAL,
-				percent_30_minute REAL, percent_60_minute REAL
-				)''')
 
 	#Create the table for tracking each time we query the listings
 	crsr.execute('''CREATE TABLE IF NOT EXISTS queryTracker(qNum INTEGER PRIMARY KEY ASC, 
-			queryDateTime TEXT, listingCount INTEGER,qElapsed REAL)''')
+			queryDateTime TEXT, listingCount INTEGER,API_Elapsed REAL, code_Elapsed REAL, qElapsed REAL)''')
 
 	dtbs.commit()
 
@@ -133,7 +118,7 @@ def main():
 	cursor.close
 
 	# Get the API url with usrname and PW
-	urlString = apiURL(usrName, PW,10)
+	urlString = apiURL(usrName, PW)
 
 	# Long running loop
 	while True:
@@ -157,7 +142,8 @@ def main():
 		cursor = db.cursor()
 
 		# Loop over the results from API Query
-		i = 1
+		# Current Listings tuple
+		curr_Listing = ()
 		for listing in listings:
 			# Datetime object from the listings response json text
 			t_start = ListingStartDate(listing['ListingStartDate'])
@@ -167,7 +153,7 @@ def main():
 
 			# Number of seconds since this listing started
 			elapsed_listing_sec = t_sec - t_start_sec
-			# elapsed_listing_sec = 15
+			# elapsed_listing_sec = 1500
 			# Given the number of elapsed seconds in the listings,
 			# return the appropriate elapsed bucket / column name		
 			el_col = elapsedBucket(elapsed_listing_sec)
@@ -179,6 +165,7 @@ def main():
 				update_Vals = (listing['ListingAmountFunded'],listing['AmountRemaining'],listing['PercentFunded'],elapsed_listing_sec, listing['ListingStatus'],listing['ListingStatusDescription'],listing['ListingNumber'])
 				# print(update_Vals)
 				cursor.execute(update_Str,update_Vals)
+				db.commit()
 			else:
 				update_Str = ("UPDATE OR IGNORE elapsedListings SET ListingAmountFunded = ?, AmountRemaining = ?, PercentFunded = ?, listingElapsedSeconds = ?, ListingStatus = ?, ListingStatusDescription = ?,"," {0} = ? WHERE listingNumber = ?")
 				update_Str = ''.join(update_Str)
@@ -187,54 +174,76 @@ def main():
 				update_Vals = (listing['ListingAmountFunded'],listing['AmountRemaining'],listing['PercentFunded'],elapsed_listing_sec, listing['ListingStatus'],listing['ListingStatusDescription'],elapsed_listing_sec,listing['ListingNumber'])
 				# print(update_Vals)
 				cursor.execute(update_Str,update_Vals)
+				db.commit()
 
 			if cursor.rowcount <1:
 				# Insert
 				if elapsed_listing_sec > 3600:
-					insert_Str = "INSERT OR IGNORE INTO allListings(listingNumber, MemberKey, ListingCreationDate, ListingStartDate, listingRequestAmount, ListingAmountFunded, AmountRemaining, PercentFunded, listingElapsedSeconds, ListingStatus, ListingStatusDescription), VALUES(?,?,?,?,?,?,?,?,?,?,?)"
-					update_Vals = (listing['ListingNumber'],listing['MemberKey'],listing['ListingCreationDate'],listing['ListingStartDate'],listing['ListingRequestAmount'],listing['ListingAmountFunded'],listing['AmountRemaining'],listing['PercentFunded'],list_elapse_sec,listing['ListingStatus'],listing['ListingStatusDescription'])
+					insert_Str = '''INSERT OR IGNORE INTO elapsedListings(listingNumber, MemberKey, ListingCreationDate, 
+						ListingStartDate, listingRequestAmount, ListingAmountFunded, AmountRemaining, PercentFunded, 
+						listingElapsedSeconds, ListingStatus, ListingStatusDescription) VALUES(?,?,?,?,?,?,?,?,?,?,?)'''
+					insert_Vals = (listing['ListingNumber'],listing['MemberKey'],listing['ListingCreationDate'],listing['ListingStartDate'],listing['ListingRequestAmount'],listing['ListingAmountFunded'],listing['AmountRemaining'],listing['PercentFunded'],elapsed_listing_sec,listing['ListingStatus'],listing['ListingStatusDescription'])
 
-					print(insert_Str)
+					cursor.execute(insert_Str,insert_Vals)
+					db.commit()
+					# print(insert_Str)
+					# print(insert_Vals)
 
 				else:
-					insert_Str = "INSERT OR IGNORE INTO allListings(listingNumber, MemberKey, ListingCreationDate, ListingStartDate, listingRequestAmount, ListingAmountFunded, AmountRemaining, PercentFunded, listingElapsedSeconds, ListingStatus, ListingStatusDescription,{0}, VALUES(?,?,?,?,?,?,?,?,?,?,?)"
+					insert_Str = "INSERT OR IGNORE INTO elapsedListings(listingNumber, MemberKey, ListingCreationDate, ListingStartDate, listingRequestAmount, ListingAmountFunded, AmountRemaining, PercentFunded, listingElapsedSeconds, ListingStatus, ListingStatusDescription, {0}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"
 					insert_Str = insert_Str.format(el_col)
-					print(insert_Str)
+					insert_Vals = (listing['ListingNumber'],listing['MemberKey'],listing['ListingCreationDate'],listing['ListingStartDate'],listing['ListingRequestAmount'],listing['ListingAmountFunded'],listing['AmountRemaining'],listing['PercentFunded'],elapsed_listing_sec,listing['ListingStatus'],listing['ListingStatusDescription'], elapsed_listing_sec)
+					# print(insert_Str)
+					# print(insert_Vals)
+
+					cursor.execute(insert_Str, insert_Vals)	
+					db.commit()
+			# Add each listing's Number to tuple
+			curr_Listing = curr_Listing + (listing['ListingNumber'],)
 
 
-			listing['ListingNumber'],
-					listing['MemberKey'],
-					listing['ListingCreationDate'],
-					listing['ListingStartDate'],
-					listing['ListingRequestAmount'],
-					listing['ListingAmountFunded'],listing['AmountRemaining'],listing['PercentFunded'],list_elapse_sec,
-					listing['ListingStatus'],listing['ListingStatusDescription']
-					#round(list_elapse.total_seconds(),2),#listing['AmountRemaining'],listing['ListingStatus'],listing['ListingStatusDescription'],cursor.execute(update_Str,update_Vals)
-			# listing['ListingNumber'],listing['MemberKey'],listing['ListingCreationDate'],listing['ListingStartDate'],listing['ListingRequestAmount'],
-			# listingNumber, MemberKey, ListingCreationDate, ListingStartDate, ListingRequestAmount,
-			# ListingAmountFunded, AmountRemaining, PercentFunded, listingElapsedSeconds,
-			# ListingStatus, ListingStatusDescription, percent_1_minute, percent_2_minute,
-			# percent_3_minute, percent_5_minute, percent_10_minute, percent_15_minute,
-			# percent_30_minute, percent_60_minute
 
+		# Make the SQL to find those listings which have dissapeared
+		notCurrent_str = "SELECT listingNumber FROM elapsedListings WHERE listingNumber NOT IN {0} AND lastSeen IS NULL"
+		notCurrent_str = notCurrent_str.format(str(curr_Listing))
+		# print(notCurrent_str)
+		
+		# Select any listing not in the tuple and with lastSeen = Null
+		lastSeenlist = []
+		for l in cursor.execute(notCurrent_str):
+			lastSeenlist.append(l[0])
+		
+		# For each no-longer-listed listing, put the current time in lastseen
+		for l2 in lastSeenlist:
+			cursor.execute("UPDATE elapsedListings SET lastseen = ? WHERE listingNumber = ?",(t, l2)) 
 
+		db.commit()		
+
+		code_time = time()
 
 		# Put query record into the queryTracker table
 		q_elapsed = round(time() - start_time,2)
 
+		# Save query stats
+		cursor.execute("INSERT INTO queryTracker(queryDateTime, listingCount, API_Elapsed, code_Elapsed, qElapsed) VALUES(?,?,?,?,?)",(str(t),(len(curr_Listing)),round(API_time - start_time,2),round(code_time - API_time,2), q_elapsed))
+		db.commit()
+
 		# Print Query Info
 		print('___________________________')
 		print('Query Time: ', queryDateTime[1])
+		print('API Time: ',round(API_time - start_time,2))
+		print('Code Time: ',round(code_time - API_time,2))
 		print('Total Query Time: ', q_elapsed)
+		print('Current Listings: ', len(curr_Listing))
 
 		# Wait for N seconds between queries
 		sleep(3)
-
-
-
-
 	cursor.close()
 	db.close()
+
+
+
+
 
 
 
