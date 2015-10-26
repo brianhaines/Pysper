@@ -4,15 +4,15 @@ def makeElTable(dtbs, crsr):
 	# Create the Elapsed Funding Tracking tables
 	# Average and Std Dev for each combo for each bucket
 
-	create_str = '''CREATE TABLE IF NOT EXISTS ElapsedStatsTracker_{0}(timeBucket TEXT PRIMARY KEY,
-				AA_1 REAL, AA_2 REAL, AA_3 REAL, AA_4 REAL, AA_5 REAL, AA_6 REAL, AA_7 REAL, AA_8 REAL, AA_9 REAL, AA_10 REAL, AA_11 REAL, 
-				A_1 REAL, A_2 REAL, A_3 REAL, A_4 REAL, A_5 REAL, A_6 REAL, A_7 REAL, A_8 REAL, A_9 REAL, A_10 REAL, A_11 REAL, 
-				B_1 REAL, B_2 REAL, B_3 REAL, B_4 REAL, B_5 REAL, B_6 REAL, B_7 REAL, B_8 REAL, B_9 REAL, B_10 REAL, B_11 REAL, 
-				C_1 REAL, C_2 REAL, C_3 REAL, C_4 REAL, C_5 REAL, C_6 REAL, C_7 REAL, C_8 REAL, C_9 REAL, C_10 REAL, C_11 REAL, 
-				D_1 REAL, D_2 REAL, D_3 REAL, D_4 REAL, D_5 REAL, D_6 REAL, D_7 REAL, D_8 REAL, D_9 REAL, D_10 REAL, D_11 REAL, 
-				E_1 REAL, E_2 REAL, E_3 REAL, E_4 REAL, E_5 REAL, E_6 REAL, E_7 REAL, E_8 REAL, E_9 REAL, E_10 REAL, E_11 REAL, 
-				HR_1 REAL, HR_2 REAL, HR_3 REAL, HR_4 REAL, HR_5 REAL, HR_6 REAL, HR_7 REAL, HR_8 REAL, HR_9 REAL, HR_10 REAL, HR_11 REAL,
-				TERM INTEGER)'''
+	create_str = '''CREATE TABLE IF NOT EXISTS ElapsedStatsTracker_{0}(sizeRange TEXT PRIMARY KEY, TERM INTEGER, Counter INTEGER,
+				AA_1 TEXT, AA_2 TEXT, AA_3 TEXT, AA_4 TEXT, AA_5 TEXT, AA_6 TEXT, AA_7 TEXT, AA_8 TEXT, AA_9 TEXT, AA_10 TEXT, AA_11 TEXT, 
+				A_1 TEXT, A_2 TEXT, A_3 TEXT, A_4 TEXT, A_5 TEXT, A_6 TEXT, A_7 TEXT, A_8 TEXT, A_9 TEXT, A_10 TEXT, A_11 TEXT, 
+				B_1 TEXT, B_2 TEXT, B_3 TEXT, B_4 TEXT, B_5 TEXT, B_6 TEXT, B_7 TEXT, B_8 TEXT, B_9 TEXT, B_10 TEXT, B_11 TEXT, 
+				C_1 TEXT, C_2 TEXT, C_3 TEXT, C_4 TEXT, C_5 TEXT, C_6 TEXT, C_7 TEXT, C_8 TEXT, C_9 TEXT, C_10 TEXT, C_11 TEXT, 
+				D_1 TEXT, D_2 TEXT, D_3 TEXT, D_4 TEXT, D_5 TEXT, D_6 TEXT, D_7 TEXT, D_8 TEXT, D_9 TEXT, D_10 TEXT, D_11 TEXT, 
+				E_1 TEXT, E_2 TEXT, E_3 TEXT, E_4 TEXT, E_5 TEXT, E_6 TEXT, E_7 TEXT, E_8 TEXT, E_9 TEXT, E_10 TEXT, E_11 TEXT, 
+				HR_1 TEXT, HR_2 TEXT, HR_3 TEXT, HR_4 TEXT, HR_5 TEXT, HR_6 TEXT, HR_7 TEXT, HR_8 TEXT, HR_9 TEXT, HR_10 TEXT, HR_11 TEXT
+				)'''
 	
 	create_str_36 = create_str.format("36")
 	create_str_60 = create_str.format("60")
@@ -25,7 +25,7 @@ def makeElTable(dtbs, crsr):
 	except Exception as e:
 		print('El Tracker Creation Errror: ', e)
 
-def updateStats(dtbs, crsr):
+def updateStats(dtbs, crsr, term_months):
 	# 1. Query rawListings for each category (77 times)
 	# 2. If there are more than 2 listings for the queried category, 
 	# 	pull each listing's elapsed funding curve from elapsed table
@@ -41,43 +41,74 @@ def updateStats(dtbs, crsr):
 					'E_1', 'E_2', 'E_3', 'E_4', 'E_5', 'E_6', 'E_7', 'E_8', 'E_9', 'E_10', 'E_11', 
 					'HR_1', 'HR_2', 'HR_3', 'HR_4', 'HR_5', 'HR_6', 'HR_7', 'HR_8', 'HR_9', 'HR_10', 'HR_11']
 
+	sizeList = [(1999, 4000), (4001, 6000), (6001, 8000), (8001, 10000), (10001, 12000), (12001, 15000), (15001,20000), (20001, 25000), (25001, 30000), (30001, 35000)]
+
 	rateScoreCounter = []
 	for i, category in enumerate(categoryList):
-		rateScore = category.split('_')
-		
-		queryStr = "SELECT ListingNumber FROM rawListings WHERE ProsperRating = '{0}' AND ProsperScore = '{1}'"
-		queryStr = queryStr.format(rateScore[0],rateScore[1])
 		
 		counter = 0
-		ListingNumber_list = []
-		for n in crsr.execute(queryStr):
-			counter += 1 # Count the occurances of each rateScore
-			# For each listingNumber returned, build a tuple
-			ListingNumber_list.append(str(n[0]))
+		for j, size in enumerate(sizeList):
+			rateScore = category.split('_')
 
-		# Done with the previous cursor, Build a list of ListingNumbers for the next SQL string
-		if counter >0:
-			ListingNumber_str = ','.join(ListingNumber_list)
-			ListingNumber_str = "("+ListingNumber_str+")"
+			queryStr = "SELECT ListingNumber FROM rawListings WHERE ProsperRating = '{0}' AND ProsperScore = '{1}' AND ListingRequestAmount BETWEEN {2} AND {3}"
+			queryStr = queryStr.format(rateScore[0],rateScore[1], size[0], size[1])
 			
-			# Build the SQL SELECT string
-			## Bifurcate here to account for 36 and 60 month terms
-			queryStr = "SELECT avg(percent_30_seconds), avg(percent_1_minute), avg(percent_2_minute), avg(percent_3_minute), avg(percent_5_minute), avg(percent_10_minute), avg(percent_15_minute), avg(percent_30_minute), avg(percent_60_minute) FROM elapsedListings WHERE ListingNumber IN {0}"
-			queryStr = queryStr.format(ListingNumber_str)
-			
-			for m in crsr.execute(queryStr):
-				print(category, m)
 
-			# Here is where we insert the averages for 36 and 60 months into their tables.
+			ListingNumber_list = []
+			for n in crsr.execute(queryStr):
+				counter += 1 # Count the occurances of each rateScore
+				# For each listingNumber returned, build a tuple
+				ListingNumber_list.append(str(n[0]))
+
+			# Done with the previous cursor, Build a list of ListingNumbers for the next SQL string
+			if counter >0:
+				ListingNumber_str = ','.join(ListingNumber_list)
+				ListingNumber_str = "("+ListingNumber_str+")"
+				
+				# Build the SQL SELECT string
+				# Bifurcate here to account for 36 and 60 month terms
+				queryStr = "SELECT avg(el.percent_30_seconds), avg(el.percent_1_minute), avg(el.percent_2_minute), avg(el.percent_3_minute), avg(el.percent_5_minute), avg(el.percent_10_minute), avg(el.percent_15_minute), avg(el.percent_30_minute), avg(el.percent_60_minute)  FROM elapsedListings AS el  INNER JOIN rawListings AS raw ON el.listingNumber=raw.listingNumber WHERE raw.ListingTerm = {0} AND el.ListingNumber IN {1}"
+				# queryStr_60 = "SELECT avg(el.percent_30_seconds), avg(el.percent_1_minute), avg(el.percent_2_minute), avg(el.percent_3_minute), avg(el.percent_5_minute), avg(el.percent_10_minute), avg(el.percent_15_minute), avg(el.percent_30_minute), avg(el.percent_60_minute)  FROM elapsedListings AS el  INNER JOIN rawListings AS raw ON el.listingNumber=raw.listingNumber WHERE raw.ListingTerm = 60 AND el.ListingNumber IN {0}"
+				queryStr = queryStr.format(term_months, ListingNumber_str)
+				# queryStr_60 = queryStr_60.format(ListingNumber_str)
+				# print(queryStr)
 
 
+				# # Do the the query for specified term
+				prim_key = category + '_' + str(size[0]) + '_' + str(size[1])
+				update_Vals = []
+				insert_Vals =  []
+				for m in crsr.execute(queryStr):
+					elapsed_vals = m
+
+				update_Str = "UPDATE OR IGNORE ElapsedStatsTracker_{0} SET {1} = ?, Counter = ?, Term = ? WHERE sizeRange  = ?"
+				update_Str = update_Str.format(term_months, category)
+				update_Vals.append(str(elapsed_vals))
+				update_Vals.append(counter)
+				update_Vals.append(term_months)
+				update_Vals.append(prim_key)
+				# print(size, update_Vals)
+				crsr.execute(update_Str,update_Vals)
+				dtbs.commit()
+				# print(prim_key, counter, m)
+				if crsr.rowcount <1:
+					# Nothing updated, so insert.
+					insert_Str = "INSERT OR IGNORE INTO ElapsedStatsTracker_{0}(sizeRange, Counter, Term, {1}) VALUES(?,?,?,?)"
+					insert_Str = insert_Str.format(term_months, category)
+					
+					insert_Vals.append(prim_key)
+					insert_Vals.append(counter)
+					insert_Vals.append(term_months)
+					insert_Vals.append(str(elapsed_vals))
+					crsr.execute(insert_Str,insert_Vals)
+					dtbs.commit()
+
+		rateScoreCounter.append((category, counter))	
+		
+	for each in rateScoreCounter:
+		print(each)
 
 
-		rateScoreCounter.append((rateScore,counter)) # Accumulate all of the rateScore counts
-
-	# Print the rateScore counts
-	# for each in rateScoreCounter:
-	# 	print(each)
 
 
 
@@ -92,10 +123,13 @@ def main():
 	# cursor.execute("PRAGMA journal_mode = %s" %("WAL"))
 	# db.commit
 
-	# Pull stats of elapsed funding curves
-	updateStats(db, cursor)
+	# Make the tables
+	makeElTable(db, cursor)
+	
 
-	# makeElTable(db, cursor)
+	# Pull stats of elapsed funding curves
+	updateStats(db, cursor,36)
+
 	
 
 	cursor.close()
